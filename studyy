@@ -1,0 +1,334 @@
+import tkinter as tk
+from tkinter import messagebox, simpledialog, ttk
+import json, random, os, csv
+from datetime import datetime
+
+# ---------- App Directory & Files ----------
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+TASKS_FILE = os.path.join(APP_DIR, "tasks.json")
+FIRST_RUN_FILE = os.path.join(APP_DIR, "first_run.flag")
+BRAIN_FOG_FILE = os.path.join(APP_DIR, "brain_fog_data.csv")
+
+# ---------- Global Variables ----------
+used_exercises = []
+
+# ---------- Sample Data ----------
+QUOTES = [
+    "Like a tree, grow a little every day.",
+    "Every forest starts with a single seed.",
+    "Stay grounded, but keep reaching upward.",
+    "Calm mind, steady progress.",
+    "You’re growing beautifully. Keep going!"
+]
+
+EXERCISES = [
+    {"exercise": "17 + 26 = ?", "answer": "43"},
+    {"exercise": "25 * 4 = ?", "answer": "100"},
+    {"exercise": "150 ÷ 3 = ?", "answer": "50"},
+    {"exercise": "45 - 12 = ?", "answer": "33"},
+    {"exercise": "Word from 'RAP'? (3 letters)", "answer": "PAR"}
+]
+
+# --- Reset tasks.json on very first launch ---
+if not os.path.exists(FIRST_RUN_FILE):
+    with open(FIRST_RUN_FILE, "w") as f:
+        f.write("initialized")
+    with open(TASKS_FILE, "w") as f:
+        f.write("[]")  # truly empty task list
+
+# ---------- Load / Save Tasks ----------
+def load_tasks():
+    if not os.path.exists(TASKS_FILE):
+        return []
+
+    try:
+        with open(TASKS_FILE, "r") as f:
+            content = f.read().strip()
+
+        if content == "":
+            return []
+
+        tasks = json.loads(content)
+
+        if tasks and isinstance(tasks[0], str):
+            tasks = [{"task": t, "deadline": "No deadline", "completed": False} for t in tasks]
+            save_tasks(tasks)
+            return tasks
+
+        updated = False
+        for t in tasks:
+            if "completed" not in t:
+                t["completed"] = False
+                updated = True
+        if updated:
+            save_tasks(tasks)
+
+        return tasks
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+def save_tasks(tasks):
+    with open(TASKS_FILE, "w") as f:
+        json.dump(tasks, f, indent=2)
+
+# ---------- Task Operations ----------
+def refresh_tasks():
+    for widget in task_frame_inner.winfo_children():
+        widget.destroy()
+
+    tasks = load_tasks()
+    for idx, t in enumerate(tasks):
+        bg = "#ecf4e8" if idx % 2 == 0 else "#f7fdf4"
+        frame = tk.Frame(task_frame_inner, bg=bg, pady=5)
+        frame.pack(fill="x")
+
+        var = tk.BooleanVar(value=t["completed"])
+        cb = tk.Checkbutton(
+            frame,
+            text=f"{t['task']}  —  {t['deadline']}",
+            variable=var,
+            bg=bg,
+            activebackground=bg,
+            font=("Segoe UI", 12, "overstrike" if t["completed"] else "normal"),
+            anchor="w",
+            command=lambda i=idx, v=var: toggle_task(i, v)
+        )
+        cb.pack(fill="x", padx=10)
+
+    task_canvas.configure(scrollregion=task_canvas.bbox("all"))
+
+def add_task():
+    text = task_entry.get().strip()
+    dl = deadline_entry.get().strip()
+
+    if not text:
+        messagebox.showwarning("Missing Input", "Task cannot be empty.")
+        return
+
+    tasks = load_tasks()
+    tasks.append({"task": text, "deadline": dl or "No deadline", "completed": False})
+    save_tasks(tasks)
+
+    task_entry.delete(0, tk.END)
+    deadline_entry.delete(0, tk.END)
+    refresh_tasks()
+
+def toggle_task(i, var):
+    tasks = load_tasks()
+    tasks[i]["completed"] = var.get()
+    save_tasks(tasks)
+    refresh_tasks()
+
+def delete_completed():
+    tasks = load_tasks()
+    tasks = [t for t in tasks if not t["completed"]]
+    save_tasks(tasks)
+    refresh_tasks()
+
+# ---------- Motivation ----------
+def motivate():
+    messagebox.showinfo("Grow Strong 🌿", random.choice(QUOTES))
+
+# ---------- Mini Exercise ----------
+def mini_exercise():
+    global used_exercises
+    available = [e for e in EXERCISES if e["exercise"] not in used_exercises]
+    if not available:
+        used_exercises = []
+        available = EXERCISES.copy()
+    ex = random.choice(available)
+    used_exercises.append(ex["exercise"])
+
+    ans = simpledialog.askstring("Mini Exercise 🌱", ex["exercise"])
+    if ans == ex["answer"]:
+        messagebox.showinfo("Correct!", "🌿 Great job!")
+    else:
+        messagebox.showinfo("Incorrect", f"Correct answer: {ex['answer']}")
+
+# ---------- Pomodoro ----------
+pomodoro_minutes = 25
+pomodoro_seconds = 0
+pomodoro_running = False
+pomodoro_break = False
+
+def update_timer_label():
+    mins = str(pomodoro_minutes).zfill(2)
+    secs = str(pomodoro_seconds).zfill(2)
+    timer_label.config(text=f"{mins}:{secs}")
+
+    total = 25*60 if not pomodoro_break else 5*60
+    elapsed = total - (pomodoro_minutes*60 + pomodoro_seconds)
+    progress_bar['value'] = int((elapsed/total)*100)
+
+def start_pomodoro():
+    global pomodoro_running, pomodoro_minutes, pomodoro_seconds
+    global pomodoro_break
+    if pomodoro_running:
+        return
+    pomodoro_running = True
+    pomodoro_minutes = 25 if not pomodoro_break else 5
+    pomodoro_seconds = 0
+    update_timer_label()
+    countdown()
+
+def stop_pomodoro():
+    global pomodoro_running
+    pomodoro_running = False
+    status_label.config(text="Pomodoro stopped")
+
+def countdown():
+    global pomodoro_minutes, pomodoro_seconds
+    global pomodoro_running, pomodoro_break
+    if pomodoro_running:
+        if pomodoro_seconds == 0:
+            if pomodoro_minutes == 0:
+                pomodoro_running = False
+                if not pomodoro_break:
+                    messagebox.showinfo("Focus Done 🌿", "Take a 5-minute break.")
+                    pomodoro_break = True
+                else:
+                    messagebox.showinfo("Break Done 🍃", "Let's focus again!")
+                    pomodoro_break = False
+                start_pomodoro()
+                return
+            else:
+                pomodoro_minutes -= 1
+                pomodoro_seconds = 59
+        else:
+            pomodoro_seconds -= 1
+        update_timer_label()
+        root.after(1000, countdown)
+
+# ---------- Brain Fog ----------
+def save_brain_fog(data):
+    file_exists = os.path.isfile(BRAIN_FOG_FILE)
+    with open(BRAIN_FOG_FILE, "a", newline="") as file:
+        writer = csv.writer(file)
+        if not file_exists:
+            writer.writerow(["Date", "Focus", "Sleepiness", "Understanding", "Memory", "Stress", "Score", "Fog Level"])
+        writer.writerow(data)
+
+def brain_fog_detector():
+    fog_window = tk.Toplevel(root)
+    fog_window.title("Brain Fog Detector")
+    fog_window.geometry("400x480")
+    fog_window.config(bg="#e6fdff")
+
+    title = tk.Label(fog_window, text="🧠 Brain Fog Detector", font=("Arial", 18, "bold"), bg="#e6f6ff")
+    title.pack(pady=15)
+
+    focus_var = tk.IntVar(value=3)
+    sleepy_var = tk.IntVar(value=3)
+    understand_var = tk.IntVar(value=3)
+    memory_var = tk.IntVar(value=3)
+    stress_var = tk.IntVar(value=3)
+
+    def create_slider(text, variable):
+        frame = tk.Frame(fog_window, bg="#e6feff")
+        frame.pack(pady=8)
+        tk.Label(frame, text=text, font=("Arial", 12), bg="#e6fbff").pack()
+        tk.Scale(frame, from_=1, to=5, orient="horizontal", length=250, variable=variable, bg="#e6f2ff").pack()
+
+    create_slider("Focus Level (1–5)", focus_var)
+    create_slider("Sleepiness (1–5)", sleepy_var)
+    create_slider("Understanding Speed (1–5)", understand_var)
+    create_slider("Memory Sharpness (1–5)", memory_var)
+    create_slider("Stress Level (1–5)", stress_var)
+
+    def calculate_fog():
+        f = focus_var.get()
+        s = sleepy_var.get()
+        u = understand_var.get()
+        m = memory_var.get()
+        st = stress_var.get()
+
+        score = (f + u + m) - (s + st)
+        if score >= 8:
+            fog = "Clear Mind"
+            tip = "Great day to study deeply!"
+        elif score >= 3:
+            fog = "Mild Fog"
+            tip = "Take a 10-minute break and hydrate."
+        else:
+            fog = "Heavy Fog"
+            tip = "Take a rest before studying."
+
+        today_str = datetime.today().strftime("%Y-%m-%d")
+        save_brain_fog([today_str, f, s, u, m, st, score, fog])
+
+        messagebox.showinfo(fog, tip)
+        fog_window.destroy()
+
+    tk.Button(fog_window, text="Calculate", command=calculate_fog, font=("Arial", 14)).pack(pady=20)
+
+# ---------------------------------------------------------------
+# ---------------------------- GUI -------------------------------
+# ---------------------------------------------------------------
+root = tk.Tk()
+root.title("Study Buddy — Forest Edition")
+root.geometry("1100x630")
+root.config(bg="#dce9d5")
+
+# Header
+tk.Label(root, text="Study Buddy",
+         font=("Segoe UI", 28, "bold"),
+         bg="#c8dfc0").pack(fill="x", pady=10)
+
+# Layout Frames
+main_frame = tk.Frame(root, bg="#dce9d5")
+main_frame.pack(fill="both", expand=True)
+
+# LEFT: Task List
+task_frame = tk.Frame(main_frame, bg="#cfe7c9", bd=3, relief="ridge")
+task_frame.pack(side="left", fill="both", expand=True, padx=20, pady=20)
+
+task_canvas = tk.Canvas(task_frame, bg="#f7fdf4", highlightthickness=0)
+scrollbar = tk.Scrollbar(task_frame, orient="vertical", command=task_canvas.yview)
+task_canvas.configure(yscrollcommand=scrollbar.set)
+
+scrollbar.pack(side="right", fill="y")
+task_canvas.pack(side="left", fill="both", expand=True)
+
+task_frame_inner = tk.Frame(task_canvas, bg="#f7fdf4")
+task_canvas.create_window((0, 0), window=task_frame_inner, anchor="nw")
+task_frame_inner.bind("<Configure>",
+                      lambda e: task_canvas.configure(scrollregion=task_canvas.bbox("all")))
+
+# RIGHT: Controls
+control_frame = tk.Frame(main_frame, bg="#cfe7c9", bd=3, relief="ridge")
+control_frame.pack(side="right", fill="y", padx=20, pady=20)
+
+def forest_button(text, cmd):
+    return tk.Button(control_frame, text=text, font=("Segoe UI", 12),
+                     bg="#4d7c4a", fg="white", width=20, height=1,
+                     relief="raised", bd=3, command=cmd)
+
+tk.Label(control_frame, text="Task:", font=("Segoe UI", 12), bg="#cfe7c9").pack(pady=(10,0))
+task_entry = tk.Entry(control_frame, font=("Segoe UI", 12), width=23)
+task_entry.pack(pady=5)
+
+tk.Label(control_frame, text="Deadline:", font=("Segoe UI", 12), bg="#cfe7c9").pack()
+deadline_entry = tk.Entry(control_frame, font=("Segoe UI", 12), width=23)
+deadline_entry.pack(pady=5)
+
+forest_button("Add Task", add_task).pack(pady=5)
+forest_button("Delete Task", delete_completed).pack(pady=5)
+forest_button("Motivation", motivate).pack(pady=5)
+forest_button("Mini Exercise", mini_exercise).pack(pady=5)
+forest_button("Start Pomodoro", start_pomodoro).pack(pady=5)
+forest_button("Stop Pomodoro", stop_pomodoro).pack(pady=5)
+forest_button("Brain Fog Detector", brain_fog_detector).pack(pady=5)
+
+# Pomodoro Display
+timer_label = tk.Label(root, text="25:00", font=("Segoe UI", 48), bg="#dce9d5")
+timer_label.pack()
+status_label = tk.Label(root, text="Pomodoro not started", font=("Segoe UI", 16), bg="#dce9d5")
+status_label.pack(pady=5)
+progress_bar = ttk.Progressbar(root, length=250, mode="determinate", maximum=100)
+progress_bar.pack(pady=10)
+
+# Load tasks initially
+refresh_tasks()
+
+root.mainloop()
